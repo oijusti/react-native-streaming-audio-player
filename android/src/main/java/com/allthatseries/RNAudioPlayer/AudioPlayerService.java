@@ -8,8 +8,8 @@ import android.os.Bundle;
 import android.os.IBinder;
 import android.os.RemoteException;
 import android.os.SystemClock;
-import android.support.v4.content.LocalBroadcastManager;
-import android.support.v4.media.session.MediaButtonReceiver;
+import androidx.localbroadcastmanager.content.LocalBroadcastManager;
+import androidx.media.session.MediaButtonReceiver;
 import android.support.v4.media.MediaMetadataCompat;
 import android.support.v4.media.session.MediaControllerCompat;
 import android.support.v4.media.session.MediaSessionCompat;
@@ -137,11 +137,7 @@ public class AudioPlayerService extends Service {
         updatePlaybackState();
 
         // 3) Create the media controller
-        try {
-            mMediaController = new MediaControllerCompat(this, mMediaSession.getSessionToken());
-        } catch(RemoteException e) {
-            e.printStackTrace();
-        }
+        mMediaController = new MediaControllerCompat(this, mMediaSession.getSessionToken());
 
         // 4) Create notification manager instance
         try {

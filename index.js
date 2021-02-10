@@ -1,2 +1,6 @@
-var { NativeModules } = require('react-native');
-module.exports = NativeModules.RNAudioPlayer;
+
+import { NativeModules } from 'react-native';
+
+const { RNAudioPlayer } = NativeModules;
+
+export default RNAudioPlayer;
