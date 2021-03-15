@@ -36,20 +36,33 @@ react-native run-ios or run-android
 
 # Usage
 ```javascript
+import React, { Component } from 'react';
+import {
+  View,
+  Button,
+  StyleSheet,
+} from 'react-native';
 import Player from 'react-native-streaming-audio-player';
 
 export default class Example extends Component {
   constructor(props) {
     super(props);
     this.state = { currentTime: 0 }
-    this.onUpdatePosition = this.onUpdatePosition.bind(this);
+    // this.onUpdatePosition = this.onUpdatePosition.bind(this);
   }
 
   onPlay() {
+    let source = {
+      url: "http://19173.live.streamtheworld.com:3690/RADIO_AAC_SC",
+      title: "Test Audio",
+      artist: "Radio",
+      album_art_uri: "https://helpx.adobe.com/content/dam/help/en/stock/how-to/visual-reverse-image-search/jcr_content/main-pars/image/visual-reverse-image-search-v2_intro.jpg",
+    };
+
     Player.play(source.url, {
-      title: source,
+      title: source.title,
       artist: source.artist,
-      album_art_uri: source.arworkUrl,
+      album_art_uri: source.album_art_uri,
     });
   }
 

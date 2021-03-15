@@ -9,17 +9,16 @@ import android.content.ServiceConnection;
 import android.net.Uri;
 import android.os.Bundle;
 import android.os.IBinder;
-import android.os.RemoteException;
-import android.support.annotation.Nullable;
-import android.support.v4.content.LocalBroadcastManager;
 import android.support.v4.media.MediaMetadataCompat;
 import android.support.v4.media.session.MediaControllerCompat;
 import android.support.v4.media.session.PlaybackStateCompat;
 import android.util.Log;
 
+import androidx.annotation.Nullable;
+import androidx.localbroadcastmanager.content.LocalBroadcastManager;
+
 import com.facebook.react.bridge.Arguments;
 import com.facebook.react.bridge.Callback;
-import com.facebook.react.bridge.LifecycleEventListener;
 import com.facebook.react.bridge.ReactApplicationContext;
 import com.facebook.react.bridge.ReactContextBaseJavaModule;
 import com.facebook.react.bridge.ReactMethod;
@@ -93,7 +92,7 @@ public class RNAudioPlayerModule extends ReactContextBaseJavaModule implements S
 
     @Override
     public String getName() {
-    return "RNAudioPlayer";
+        return "RNAudioPlayer";
     }
 
     private void sendEvent(String eventName, @Nullable WritableMap params) {
@@ -118,13 +117,9 @@ public class RNAudioPlayerModule extends ReactContextBaseJavaModule implements S
     @Override
     public void onServiceConnected(ComponentName name, IBinder service) {
         if (service instanceof AudioPlayerService.ServiceBinder) {
-            try {
-                mService = ((AudioPlayerService.ServiceBinder) service).getService();
-                mMediaController = new MediaControllerCompat(this.reactContext,
-                        ((AudioPlayerService.ServiceBinder) service).getService().getMediaSessionToken());
-            } catch (RemoteException e) {
-                Log.e("ERROR", e.getMessage());
-            }
+            mService = ((AudioPlayerService.ServiceBinder) service).getService();
+            mMediaController = new MediaControllerCompat(this.reactContext,
+                    ((AudioPlayerService.ServiceBinder) service).getService().getMediaSessionToken());
         }
     }
 

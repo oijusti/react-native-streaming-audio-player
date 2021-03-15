@@ -1,8 +1,6 @@
 
 #import "RNAudioPlayer.h"
 #import <React/RCTBridge.h>
-#import <React/RCTEventDispatcher.h>
-#import <React/RCTEventEmitter.h>
 #import <AVFoundation/AVFoundation.h>
 #import <Foundation/Foundation.h>
 #import <MediaPlayer/MediaPlayer.h>
@@ -19,6 +17,8 @@
     MPNowPlayingInfoCenter *center;
     NSDictionary *songInfo;
     MPMediaItemArtwork *albumArt;
+    NSInteger trackIndex;
+    NSArray *tracks;
 }
 
 @end
@@ -29,14 +29,19 @@
 
 RCT_EXPORT_MODULE();
 
++ (BOOL)requiresMainQueueSetup
+{
+    return YES;
+}
+
 - (RNAudioPlayer *)init {
     self = [super init];
     if (self) {
-        [self registerRemoteControlEvents];
+        //        [self registerRemoteControlEvents];
         [self registerAudioInterruptionNotifications];
-        UIImage *defaultArtwork = [UIImage imageNamed:@"default_artwork-t300x300"];
-        albumArt = [[MPMediaItemArtwork alloc] initWithImage: defaultArtwork];
-        center = [MPNowPlayingInfoCenter defaultCenter];
+        //        UIImage *defaultArtwork = [UIImage imageNamed:@"default_artwork-t300x300"];
+        //        albumArt = [[MPMediaItemArtwork alloc] initWithImage: defaultArtwork];
+        //        center = [MPNowPlayingInfoCenter defaultCenter];
         NSLog(@"AudioPlayer initialized!");
     }
     
@@ -51,9 +56,55 @@ RCT_EXPORT_MODULE();
     [self deactivate];
 }
 
+- (NSArray<NSString *> *)supportedEvents {
+  return @[
+      @"onPlaybackStateChanged",
+      @"onPlaybackPositionUpdated",
+      @"onPlaybackError",
+      @"onPlaybackErrorTracks",
+      @"onPlaybackActionChanged"
+  ];
+}
+
 #pragma mark - Pubic API
 
 RCT_EXPORT_METHOD(play:(NSString *)url:(NSDictionary *) metadata) {
+    [self playUrl:url metadata:metadata];
+}
+
+RCT_EXPORT_METHOD(playTracks:(NSArray *) tracks_p) {
+    tracks = [tracks_p copy];
+    trackIndex = 0;
+    [self playTrack:trackIndex];
+}
+
+RCT_EXPORT_METHOD(pause) {
+    [self pauseOrStop:@"PAUSE"];
+}
+
+RCT_EXPORT_METHOD(resume) {
+    [self playAudio];
+}
+
+RCT_EXPORT_METHOD(stop) {
+    [self pauseOrStop:@"STOP"];
+}
+
+RCT_EXPORT_METHOD(seekTo:(int) nSecond) {
+    CMTime newTime = CMTimeMakeWithSeconds(nSecond/1000, 1);
+    [self.player seekToTime:newTime];
+}
+
+#pragma mark - Audio
+
+-(void) playTrack:(NSInteger) index {
+    NSDictionary *track = [tracks objectAtIndex:index];
+    [self playUrl:[track objectForKey:@"url"] metadata:[track objectForKey:@"metadata"]];
+}
+
+-(void) playUrl: (NSString *)url metadata:(NSDictionary *) metadata {
+    NSLog(@"AudioPlayer playing %@", [metadata objectForKey:@"title"]);
+    
     if(!([url length]>0)) return;
     
     // if audio is playing, stop the audio first
@@ -87,7 +138,9 @@ RCT_EXPORT_METHOD(play:(NSString *)url:(NSDictionary *) metadata) {
     
     // checking if iOS 10 or newer
     if ([[UIDevice currentDevice].systemVersion floatValue] >= 10) {
-        self.player.automaticallyWaitsToMinimizeStalling = false;
+        if (@available(iOS 10.0, *)) {
+            self.player.automaticallyWaitsToMinimizeStalling = false;
+        }
     }
     
     // adding observers to check if audio is ready to play or it has an issue
@@ -97,31 +150,11 @@ RCT_EXPORT_METHOD(play:(NSString *)url:(NSDictionary *) metadata) {
     soundUrl = nil;
 }
 
-RCT_EXPORT_METHOD(pause) {
-    [self pauseOrStop:@"PAUSE"];
-}
-
-RCT_EXPORT_METHOD(resume) {
-    [self playAudio];
-}
-
-RCT_EXPORT_METHOD(stop) {
-    [self pauseOrStop:@"STOP"];
-}
-
-RCT_EXPORT_METHOD(seekTo:(int) nSecond) {
-    CMTime newTime = CMTimeMakeWithSeconds(nSecond/1000, 1);
-    [self.player seekToTime:newTime];
-}
-
-#pragma mark - Audio
-
 -(void) playAudio {
     [self.player play];
     
     // send player state PLAYING to js
-    [self.bridge.eventDispatcher sendDeviceEventWithName: @"onPlaybackStateChanged"
-                                                    body: @{@"state": @"PLAYING" }];
+    [self sendEventWithName: @"onPlaybackStateChanged" body: @{@"state": @"PLAYING" }];
     // if play was stalled
     if (stalled) {
         stalled = false;
@@ -134,16 +167,15 @@ RCT_EXPORT_METHOD(seekTo:(int) nSecond) {
     playbackTimeObserver =
     [self.player addPeriodicTimeObserverForInterval:CMTimeMakeWithSeconds(1.0, NSEC_PER_SEC) queue:dispatch_get_main_queue() usingBlock:^(CMTime time) {
         
-        [weakSelf.bridge.eventDispatcher sendDeviceEventWithName: @"onPlaybackPositionUpdated"
-                                                            body: @{@"currentPosition": @(CMTimeGetSeconds(time)*1000) }];
-        songInfo = @{
-                     MPMediaItemPropertyTitle: rapName,
-                     MPMediaItemPropertyArtist: songTitle,
-                     MPNowPlayingInfoPropertyPlaybackRate: [NSNumber numberWithFloat: 1.0f],
-                     MPMediaItemPropertyPlaybackDuration: [NSNumber numberWithFloat:duration],
-                     MPNowPlayingInfoPropertyElapsedPlaybackTime: [NSNumber numberWithDouble:self.currentPlaybackTime],
-                     MPMediaItemPropertyArtwork: albumArt
-                     };
+        [weakSelf sendEventWithName: @"onPlaybackPositionUpdated" body: @{@"currentPosition": @(CMTimeGetSeconds(time)*1000) }];
+        self->songInfo = @{
+            MPMediaItemPropertyTitle: self->rapName,
+            MPMediaItemPropertyArtist: self->songTitle,
+            MPNowPlayingInfoPropertyPlaybackRate: [NSNumber numberWithFloat: 1.0f],
+            MPMediaItemPropertyPlaybackDuration: [NSNumber numberWithFloat:self->duration],
+            MPNowPlayingInfoPropertyElapsedPlaybackTime: [NSNumber numberWithDouble:self.currentPlaybackTime],
+            MPMediaItemPropertyArtwork: self->albumArt
+        };
         center.nowPlayingInfo = songInfo;
     }];
     
@@ -155,23 +187,21 @@ RCT_EXPORT_METHOD(seekTo:(int) nSecond) {
     
     if ([value isEqualToString:@"STOP"]) {
         // send player state STOPPED to js
-        [self.bridge.eventDispatcher sendDeviceEventWithName: @"onPlaybackStateChanged"
-                                                        body: @{@"state": @"STOPPED" }];
+        [self sendEventWithName: @"onPlaybackStateChanged" body: @{@"state": @"STOPPED" }];
         CMTime newTime = CMTimeMakeWithSeconds(0, 1);
         [self.player seekToTime:newTime];
         duration = 0;
     } else {
         // send player state PAUSED to js
-        [self.bridge.eventDispatcher sendDeviceEventWithName: @"onPlaybackStateChanged"
-                                                        body: @{@"state": @"PAUSED" }];
+        [self sendEventWithName: @"onPlaybackStateChanged" body: @{@"state": @"PAUSED" }];
         songInfo = @{
-                     MPMediaItemPropertyTitle: rapName,
-                     MPMediaItemPropertyArtist: songTitle,
-                     MPNowPlayingInfoPropertyPlaybackRate: [NSNumber numberWithFloat: 0.0],
-                     MPMediaItemPropertyPlaybackDuration: [NSNumber numberWithFloat:duration],
-                     MPNowPlayingInfoPropertyElapsedPlaybackTime: [NSNumber numberWithDouble:self.currentPlaybackTime],
-                     MPMediaItemPropertyArtwork: albumArt
-                     };
+            MPMediaItemPropertyTitle: rapName,
+            MPMediaItemPropertyArtist: songTitle,
+            MPNowPlayingInfoPropertyPlaybackRate: [NSNumber numberWithFloat: 0.0],
+            MPMediaItemPropertyPlaybackDuration: [NSNumber numberWithFloat:duration],
+            MPNowPlayingInfoPropertyElapsedPlaybackTime: [NSNumber numberWithDouble:self.currentPlaybackTime],
+            MPMediaItemPropertyArtwork: albumArt
+        };
         center.nowPlayingInfo = songInfo;
     }
     
@@ -209,11 +239,22 @@ RCT_EXPORT_METHOD(seekTo:(int) nSecond) {
             
         } else if (self.player.currentItem.status == AVPlayerItemStatusFailed) {
             if (self.player.currentItem.error) {
-                [self.bridge.eventDispatcher sendDeviceEventWithName: @"onPlaybackError"
-                                                                body: @{@"desc": self.player.currentItem.error.localizedDescription }];
+                [self sendEventWithName: @"onPlaybackError" body: @{@"desc": self.player.currentItem.error.localizedDescription }];
+                NSLog(@"AudioPlayer error: %@", self.player.currentItem.error.localizedDescription);
             } else {
-                [self.bridge.eventDispatcher sendDeviceEventWithName: @"onPlaybackError"
-                                                                body: @{@"desc": @"" }];
+                [self sendEventWithName: @"onPlaybackError" body: @{@"desc": @"" }];
+                NSLog(@"AudioPlayer error: %@", @"");
+            }
+
+            // try playing next track
+            if ([tracks count] > 0) {
+                trackIndex = trackIndex + 1;
+                if (trackIndex < [tracks count]) {
+                    [self playTrack:trackIndex];
+                }
+                else if (trackIndex == [tracks count]) {
+                    [self sendEventWithName: @"onPlaybackErrorTracks" body: @{@"desc": @"All tracks failed to play" }];
+                }
             }
         }
     } else if (object == self.player.currentItem && [keyPath isEqualToString:@"playbackLikelyToKeepUp"]) {
@@ -228,15 +269,13 @@ RCT_EXPORT_METHOD(seekTo:(int) nSecond) {
 #pragma mark - Audio Session
 
 -(void)playFinished:(NSNotification *)notification {
-    [self.playerItem seekToTime:kCMTimeZero];
-    [self.bridge.eventDispatcher sendDeviceEventWithName: @"onPlaybackStateChanged"
-                                                    body: @{@"state": @"COMPLETED" }];
+    [self.playerItem seekToTime:kCMTimeZero completionHandler:nil];
+    [self sendEventWithName: @"onPlaybackStateChanged" body: @{@"state": @"COMPLETED" }];
 }
 
 -(void)playStalled:(NSNotification *)notification {
     stalled = true;
-    [self.bridge.eventDispatcher sendDeviceEventWithName: @"onPlaybackStateChanged"
-                                                    body: @{@"state": @"PAUSED" }];
+    [self sendEventWithName: @"onPlaybackStateChanged" body: @{@"state": @"PAUSED" }];
 }
 
 -(void)activate {
@@ -305,16 +344,14 @@ RCT_EXPORT_METHOD(seekTo:(int) nSecond) {
         case AVAudioSessionInterruptionTypeBegan:
             // if duration exists
             if (duration != 0) {
-                [self.bridge.eventDispatcher sendDeviceEventWithName: @"onPlaybackStateChanged"
-                                                                body: @{@"state": @"PAUSED" }];
+                [self sendEventWithName: @"onPlaybackStateChanged" body: @{@"state": @"PAUSED" }];
             }
             break;
             
         case AVAudioSessionInterruptionTypeEnded:
             // if duration exists && AVAudioSessionInterruptionOptionShouldResume (phone call)
             if (duration != 0 && [notification.userInfo[AVAudioSessionInterruptionOptionKey] intValue] == AVAudioSessionInterruptionOptionShouldResume) {
-                [self.bridge.eventDispatcher sendDeviceEventWithName: @"onPlaybackActionChanged"
-                                                                body: @{@"action": @"PLAY" }];
+                [self sendEventWithName: @"onPlaybackActionChanged" body: @{@"action": @"PLAY" }];
             }
             break;
             
@@ -333,8 +370,7 @@ RCT_EXPORT_METHOD(seekTo:(int) nSecond) {
     
     // when headphone was pulled (AVAudioSessionRouteChangeReasonOldDeviceUnavailable)
     if (routeChangeReason == 2) {
-        [self.bridge.eventDispatcher sendDeviceEventWithName: @"onPlaybackActionChanged"
-                                                        body: @{@"action": @"PAUSE" }];
+        [self sendEventWithName: @"onPlaybackActionChanged" body: @{@"action": @"PAUSE" }];
     }
 }
 
@@ -356,8 +392,7 @@ RCT_EXPORT_METHOD(seekTo:(int) nSecond) {
 - (void)didReceivePlayCommand:(MPRemoteCommand *)event {
     // check if player is not nil & duration is not 0 (0 means player is not initialized or stopped)
     if (self.player && duration != 0) {
-        [self.bridge.eventDispatcher sendDeviceEventWithName: @"onPlaybackActionChanged"
-                                                        body: @{@"action": @"PLAY" }];
+        [self sendEventWithName: @"onPlaybackActionChanged" body: @{@"action": @"PLAY" }];
     }
     
 }
@@ -365,30 +400,25 @@ RCT_EXPORT_METHOD(seekTo:(int) nSecond) {
 - (void)didReceivePauseCommand:(MPRemoteCommand *)event {
     // check if player is not nil & duration is not 0 (0 means player is not initialized or stopped)
     if (self.player && duration != 0) {
-        [self.bridge.eventDispatcher sendDeviceEventWithName: @"onPlaybackActionChanged"
-                                                        body: @{@"action": @"PAUSE" }];
+        [self sendEventWithName: @"onPlaybackActionChanged" body: @{@"action": @"PAUSE" }];
     }
 }
 
 - (void)didReceiveToggleCommand:(MPRemoteCommand *)event {
     // if duration exists 0 & audio is playing
     if (duration != 0 && self.player.rate) {
-        [self.bridge.eventDispatcher sendDeviceEventWithName: @"onPlaybackActionChanged"
-                                                        body: @{@"action": @"PAUSE" }];
+        [self sendEventWithName: @"onPlaybackActionChanged" body: @{@"action": @"PAUSE" }];
     } else if (duration != 0 && !self.player.rate) {
-        [self.bridge.eventDispatcher sendDeviceEventWithName: @"onPlaybackActionChanged"
-                                                        body: @{@"action": @"PLAY" }];
+        [self sendEventWithName: @"onPlaybackActionChanged" body: @{@"action": @"PLAY" }];
     }
 }
 
 - (void)didReceiveNextTrackCommand:(MPRemoteCommand *)event {
-    [self.bridge.eventDispatcher sendDeviceEventWithName: @"onPlaybackActionChanged"
-                                                    body: @{@"action": @"SKIP_TO_NEXT" }];
+    [self sendEventWithName: @"onPlaybackActionChanged" body: @{@"action": @"SKIP_TO_NEXT" }];
 }
 
 - (void)didReceivePreviousTrackCommand:(MPRemoteCommand *)event {
-    [self.bridge.eventDispatcher sendDeviceEventWithName: @"onPlaybackActionChanged"
-                                                    body: @{@"action": @"SKIP_TO_PREVIOUS" }];
+    [self sendEventWithName: @"onPlaybackActionChanged" body: @{@"action": @"SKIP_TO_PREVIOUS" }];
 }
 
 - (void)unregisterRemoteControlEvents {
@@ -409,13 +439,12 @@ RCT_EXPORT_METHOD(seekTo:(int) nSecond) {
     }
     
     songInfo = @{
-                 MPMediaItemPropertyTitle: rapName,
-                 MPMediaItemPropertyArtist: songTitle,
-                 MPNowPlayingInfoPropertyPlaybackRate: [NSNumber numberWithFloat:isPlaying ? 1.0f : 0.0],
-                 MPMediaItemPropertyArtwork: albumArt
-                 };
+        MPMediaItemPropertyTitle: rapName,
+        MPMediaItemPropertyArtist: songTitle,
+        MPNowPlayingInfoPropertyPlaybackRate: [NSNumber numberWithFloat:isPlaying ? 1.0f : 0.0],
+        MPMediaItemPropertyArtwork: albumArt
+    };
     center.nowPlayingInfo = songInfo;
 }
-
 
 @end
